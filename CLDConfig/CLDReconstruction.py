@@ -46,11 +46,17 @@ parser_group.add_argument("--calorimeterIntegrationTimeWindow", help="Calorimete
 # native EDM4hep reconstruction, which does not run the overlay, so that both outputs can be compared
 parser_group.add_argument("--overlay", help="Background overlay to use, 'Skip' does not run the overlay processor (nor the RecoMCTruthLink that depends on it)", default="False", choices=("False", "91GeV", "365GeV", "Skip"))
 parser_group.add_argument("--vertexUnconstrained", action="store_true", help="Also run the unconstrained vertex finder", default=False)
+parser_group.add_argument("--enableHitPF", action="store_true", help="Also run the HitPF hit-based ML particle flow (k4PFHitML) after the Marlin chain (EDM4hep output only)", default=False)
+parser_group.add_argument("--hitpfModelDir", help="Directory with the HitPF ONNX models (default: $K4PFHITML_MODELS)", default=os.environ.get("K4PFHITML_MODELS", ""))
 parser_group.add_argument("--outputMode", help="Output file format", default="EDM4hep", choices=("LCIO", "EDM4hep"))
 reco_args = parser.parse_known_args()[0]
 
 if reco_args.native and reco_args.outputMode == "LCIO":
     parser.error("LCIO output is not supported with --native")
+if reco_args.enableHitPF and (reco_args.native or reco_args.outputMode != "EDM4hep"):
+    parser.error("--enableHitPF requires EDM4hep output and is not supported with --native")
+if reco_args.enableHitPF and not reco_args.hitpfModelDir:
+    parser.error("--enableHitPF needs the HitPF ONNX models: pass --hitpfModelDir or set K4PFHITML_MODELS")
 
 # Decide here which stages run, such that the sequence below only needs to check a single flag.
 # Stages without a native implementation (yet) only run in the wrapped Marlin flow
@@ -203,6 +209,13 @@ if not reco_args.native:
 
     # We need to attach all the necessary converters
     io_handler.finalize_converters()
+
+    if reco_args.enableHitPF:
+        # Appended only after the converters are assigned: CollPatcherREC is then the last wrapped
+        # processor and carries the single LCIO->EDM4hep output converter that PFHitML reads from.
+        # (Appending it before finalize_converters() makes io_helpers add a second, redundant
+        # convert-all converter to the previous wrapped processor.)
+        sequenceLoader.load("HighLevelReco/HitPF")
 
 
 ApplicationMgr( TopAlg = algList,
